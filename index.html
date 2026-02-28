@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title> Star Catcher</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: #fff;
+      overflow: hidden;
+    }
+
+    header {
+      width: 100%;
+      text-align: center;
+      padding: 16px 0 8px;
+      background: rgba(255,255,255,0.05);
+      border-bottom: 2px solid rgba(255,215,0,0.3);
+    }
+    header h1 {
+      font-size: 2rem;
+      color: #d9ff00;
+      text-shadow: 0 0 20px #FFD700, 0 0 40px #FFA500;
+      letter-spacing: 2px;
+    }
+    header p {
+      font-size: 0.9rem;
+      color: #aaa;
+      margin-top: 4px;
+    }
+
+    #game-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 10px;
+    }
+
+    #hud {
+      display: flex;
+      gap: 40px;
+      margin-bottom: 10px;
+      font-size: 1.1rem;
+      font-weight: bold;
+    }
+    #hud span { color: #0ae8a9; }
+
+    #gameCanvas {
+      border: 3px solid #8f802d;
+      border-radius: 12px;
+      box-shadow: 0 0 30px rgba(231, 197, 7, 0.4), 0 0 60px rgba(255,100,0,0.2);
+      background: #0a0a1a;
+      display: block;
+    }
+
+    #overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(10,10,30,0.92);
+      border: 2px solid #FFD700;
+      border-radius: 16px;
+      padding: 36px 48px;
+      text-align: center;
+      z-index: 10;
+    }
+    #overlay h2 { font-size: 2rem; color: #FFD700; margin-bottom: 10px; }
+    #overlay p  { font-size: 1rem; color: #ccc; margin-bottom: 20px; line-height: 1.6; }
+    #overlay button {
+      background: linear-gradient(135deg, #FFD700, #FFA500);
+      color: #000;
+      font-size: 1.1rem;
+      font-weight: bold;
+      border: none;
+      padding: 12px 32px;
+      border-radius: 30px;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 15px rgba(255,165,0,0.5);
+    }
+    #overlay button:hover {
+      transform: scale(1.07);
+      box-shadow: 0 6px 25px rgba(255,165,0,0.8);
+    }
+
+    #lives-display { display: flex; gap: 6px; }
+    .heart { font-size: 1.4rem; }
+
+    footer {
+      width: 100%;
+      text-align: center;
+      padding: 12px 0;
+      background: rgba(255,255,255,0.05);
+      border-top: 2px solid rgba(255,215,0,0.3);
+      font-size: 0.85rem;
+      color: #aaa;
+      letter-spacing: 1px;
+    }
+    footer strong { color: #FFD700; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1> Star Catcher</h1>
+  <p>Catch stars. Dodge bombs. Rule the sky!</p>
+</header>
+
+<div id="game-wrapper">
+  <div id="hud">
+    <div>Score: <span id="score-display">0</span></div>
+    <div>Level: <span id="level-display">1</span></div>
+    <div id="lives-display">
+      <span class="heart">❤️</span>
+      <span class="heart">❤️</span>
+      <span class="heart">❤️</span>
+    </div>
+    <div>Hi-Score: <span id="hi-display">0</span></div>
+  </div>
+
+  <canvas id="gameCanvas" width="480" height="520"></canvas>
+
+  <div id="overlay">
+    <h2> Star Catcher</h2>
+    <p>
+      Move your basket with <b>← →</b> arrow keys<br>
+      or touch/swipe on mobile.<br><br>
+      ⭐ Catch stars to score points!<br>
+      💣 Avoid bombs – they cost a life!<br>
+      💎 Blue gems = bonus points!
+    </p>
+    <button id="startBtn" onclick="startGame()">🚀 Start Game</button>
+  </div>
+</div>
+
+<footer>
+  🎮 Design and develop by <strong>Jasim Mushtaq</strong>
+</footer>
+
+<script>
+  const canvas = document.getElementById('gameCanvas');
+  const ctx    = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  let score = 0, hiScore = 0, lives = 3, level = 1;
+  let gameRunning = false, animId = null;
+  let basket = { x: W/2 - 40, y: H - 60, w: 80, h: 28, speed: 7 };
+  let items = [], particles = [], lastTime = 0;
+  let spawnTimer = 0, spawnInterval = 1400;
+  let keys = {};
+
+  const rand = (a,b) => Math.random()*(b-a)+a;
+  const randInt = (a,b) => Math.floor(rand(a,b+1));
+
+  function spawnParticles(x, y, color, count=12) {
+    for(let i=0;i<count;i++){
+      particles.push({
+        x, y,
+        vx: rand(-4,4), vy: rand(-6,0),
+        life: 1, color,
+        r: rand(3,7)
+      });
+    }
+  }
+
+  const ITEM_TYPES = [
+    { type:'star',  emoji:'⭐', points:10, bad:false, prob:0.55 },
+    { type:'gem',   emoji:'💎', points:25, bad:false, prob:0.15 },
+    { type:'coin',  emoji:'🪙', points:15, bad:false, prob:0.20 },
+    { type:'bomb',  emoji:'💣', points:0,  bad:true,  prob:0.10 },
+  ];
+
+  function pickType() {
+    const r = Math.random();
+    let acc = 0;
+    for(const t of ITEM_TYPES){ acc+=t.prob; if(r<acc) return t; }
+    return ITEM_TYPES[0];
+  }
+
+  function spawnItem() {
+    const t = pickType();
+    items.push({
+      ...t,
+      x: rand(20, W-20),
+      y: -30,
+      speed: rand(2.5, 4.5) + (level-1)*0.4,
+      size: 28,
+    });
+  }
+
+  function drawBg() {
+    ctx.clearRect(0,0,W,H);
+  }
+
+  function drawBasket(bx) {
+    const bw = basket.w, bh = basket.h;
+    
+    ctx.save();
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur  = 18;
+
+    const grad = ctx.createLinearGradient(bx, basket.y, bx, basket.y+bh);
+    grad.addColorStop(0,'#FFD700');
+    grad.addColorStop(1,'#E67E00');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(bx+6, basket.y);
+    ctx.lineTo(bx+bw-6, basket.y);
+    ctx.lineTo(bx+bw+4, basket.y+bh);
+    ctx.lineTo(bx-4, basket.y+bh);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(bx-4, basket.y+3);
+    ctx.lineTo(bx+bw+4, basket.y+3);
+    ctx.stroke();
+    ctx.fillStyle = '#0a0a1a';
+    ctx.font = 'bold 11px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillText('JASIM', bx+bw/2, basket.y+bh-6);
+    ctx.restore();
+  }
+
+  function drawItems() {
+    for(const it of items){
+      ctx.font = `${it.size}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(it.emoji, it.x, it.y);
+    }
+  }
+
+  function drawParticles() {
+    for(const p of particles){
+      ctx.save();
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  const bgStars = Array.from({length:80}, ()=>({
+    x: Math.random()*480,
+    y: Math.random()*520,
+    r: Math.random()*1.5+0.3,
+    blink: Math.random()*Math.PI*2
+  }));
+  let bgTick = 0;
+  function drawBgStars() {
+    bgTick += 0.03;
+    for(const s of bgStars){
+      const alpha = 0.4 + 0.5*Math.abs(Math.sin(bgTick+s.blink));
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function update(dt) {
+    if(keys['ArrowLeft']  || keys['a']) basket.x -= basket.speed;
+    if(keys['ArrowRight'] || keys['d']) basket.x += basket.speed;
+    basket.x = Math.max(0, Math.min(W - basket.w, basket.x));
+
+    spawnTimer += dt;
+    if(spawnTimer >= spawnInterval){
+      spawnTimer = 0;
+      spawnItem();
+      spawnInterval = Math.max(500, 1400 - (level-1)*80);
+    }
+
+    for(let i = items.length-1; i>=0; i--){
+      const it = items[i];
+      it.y += it.speed;
+
+      const bx = basket.x - 4, bx2 = basket.x + basket.w + 4;
+      if(it.y + it.size/2 >= basket.y &&
+         it.y - it.size/2 <= basket.y + basket.h &&
+         it.x >= bx && it.x <= bx2){
+        if(it.bad){
+          loseLife();
+          spawnParticles(it.x, it.y, '#FF4444', 10);
+        } else {
+          score += it.points;
+          spawnParticles(it.x, it.y, it.type==='gem'?'#00BFFF':'#FFD700');
+          updateHUD();
+        }
+        items.splice(i,1);
+        continue;
+      }
+
+      if(it.y > H+40) items.splice(i,1);
+    }
+
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.2; p.life -= 0.04;
+      if(p.life<=0) particles.splice(i,1);
+    }
+
+    const newLevel = Math.floor(score/150)+1;
+    if(newLevel !== level){ level = newLevel; updateHUD(); }
+  }
+
+  function loseLife(){
+    lives--;
+    updateLivesUI();
+    if(lives<=0) endGame();
+  }
+
+  function updateHUD(){
+    document.getElementById('score-display').textContent = score;
+    document.getElementById('level-display').textContent = level;
+    if(score > hiScore){ hiScore=score; document.getElementById('hi-display').textContent=hiScore; }
+  }
+  function updateLivesUI(){
+    const hearts = document.querySelectorAll('.heart');
+    hearts.forEach((h,i)=> h.textContent = i < lives ? '❤️' : '🖤');
+  }
+
+  function loop(ts){
+    if(!gameRunning) return;
+    const dt = ts - lastTime; lastTime = ts;
+    drawBg();
+    drawBgStars();
+    update(dt);
+    drawItems();
+    drawBasket(basket.x);
+    drawParticles();
+    animId = requestAnimationFrame(loop);
+  }
+
+  function startGame(){
+    score=0; lives=3; level=1; items=[]; particles=[]; spawnTimer=0; spawnInterval=1400;
+    basket.x = W/2 - 40;
+    updateHUD(); updateLivesUI();
+    document.getElementById('overlay').style.display='none';
+    gameRunning = true;
+    lastTime = performance.now();
+    animId = requestAnimationFrame(loop);
+  }
+
+  function endGame(){
+    gameRunning = false;
+    cancelAnimationFrame(animId);
+    if(score > hiScore) hiScore = score;
+    const ov = document.getElementById('overlay');
+    ov.innerHTML = `
+      <h2>Game Over!</h2>
+      <p>
+        Great run, <b style="color:#004700">sticker</b>! 🎉<br><br>
+        Your Score: <b style="color:#FFD700;font-size:1.5rem">${score}</b><br>
+        Hi-Score: <b style="color:#FFA500">${hiScore}</b><br>
+        Level Reached: <b style="color:#00BFFF">${level}</b>
+      </p>
+      <button onclick="startGame()">🔁 Play Again</button>`;
+    ov.style.display='block';
+  }
+
+  document.addEventListener('keydown', e=>{ keys[e.key]=true; });
+  document.addEventListener('keyup',   e=>{ keys[e.key]=false; });
+
+  let touchStartX = null;
+  canvas.addEventListener('touchstart', e=>{ touchStartX = e.touches[0].clientX; }, {passive:true});
+  canvas.addEventListener('touchmove', e=>{
+    if(touchStartX===null) return;
+    const dx = e.touches[0].clientX - touchStartX;
+    basket.x += dx * 0.9;
+    basket.x = Math.max(0, Math.min(W - basket.w, basket.x));
+    touchStartX = e.touches[0].clientX;
+  }, {passive:true});
+
+  canvas.addEventListener('mousemove', e=>{
+    if(!gameRunning) return;
+    const rect = canvas.getBoundingClientRect();
+    basket.x = e.clientX - rect.left - basket.w/2;
+    basket.x = Math.max(0, Math.min(W - basket.w, basket.x));
+  });
+
+  drawBgStars();
+</script>
+</body>
+</html>
